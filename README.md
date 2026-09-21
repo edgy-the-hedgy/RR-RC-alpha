@@ -18,6 +18,12 @@ SKSE core plugin for advanced graphics modifications for Skyrim and fork of Comm
 
 [Open Shaders developer wiki](https://github.com/alandtse/open-shaders/wiki) · [Upstream Community Shaders on Nexus](https://www.nexusmods.com/skyrimspecialedition/mods/86492) · [Upstream source](https://github.com/community-shaders/skyrim-community-shaders) · [Upstream developer wiki](https://github.com/community-shaders/skyrim-community-shaders/wiki)
 
+## Important Information
+
+> **GPU requirement: AMD RDNA 4**
+>
+> RR-RC-alpha currently requires an AMD RDNA 4 GPU. This release is intended for and has been validated on RDNA 4 hardware. Earlier RDNA generations and non-AMD GPUs are not currently supported by this project.
+
 ## About this fork
 
 **Open Shaders is a fork of [Community Shaders](https://github.com/community-shaders/skyrim-community-shaders).** All of the architecture, the shader pipeline, the feature framework, and the vast majority of the code in this repository originated upstream and is the work of the upstream Community Shaders authors and contributors. Copyrights and authorship are preserved unchanged. See the upstream [contributors page](https://github.com/community-shaders/skyrim-community-shaders/graphs/contributors) for the team behind the project.
