@@ -142,6 +142,12 @@ RR-RC-alpha vendors the dependency source trees required by the project. A recur
 
 > The DLL filename is `CommunityShaders.dll` and the SKSE plugin directory is `SKSE/Plugins/CommunityShaders/` — identical to upstream Community Shaders, so user settings, themes, and mod-manager profiles are drop-in compatible. Only the public name and in-game branding are "Open Shaders".
 
+
+Public repository clone command:
+
+    git clone https://github.com/edgy-the-hedgy/RR-RC-alpha.git
+    cd RR-RC-alpha
+
 ### Visual Studio build
 
 To build the project, just open `./open-shaders` with Visual Studio's "Open Folder" feature. (Ensure you have `CMake Tools for Windows` selected when installing VS)
