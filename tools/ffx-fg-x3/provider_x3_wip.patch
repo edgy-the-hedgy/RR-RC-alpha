@@ -1,0 +1,24 @@
+# WIP patch target: FidelityFX SDK commit 60f4ea81909200d8542eca14dccb2628b763a9a3
+# Files: Kits/FidelityFX/framegeneration/fsr3/dx12/FrameInterpolationSwapchainDX12.{h,cpp}
+#
+# Required mechanical changes established from source trace:
+# 1. FrameType: Interpolated_1, Interpolated_2, Real, Count.
+# 2. Increase interpolation output pool from 2 to 4 so two outputs can remain live per
+#    generated pair while the next pair is produced asynchronously.
+# 3. dispatchInterpolationCommands returns generated[2] + real; callback path sets
+#       desc.outputs[0] = interpolationOutput(pairBase + 0)
+#       desc.outputs[1] = interpolationOutput(pairBase + 1)
+#       desc.numGeneratedFrames = 2
+#    and preserves the same frameID for the pair.
+# 4. presentInterpolated schedules Interpolated_1, Interpolated_2, Real in that order,
+#    with monotonically increasing presentIndex values and per-output availability fences.
+# 5. Pacer keeps the existing moving-average/variance calculation but converts the stock
+#    x2 interval to x3 spacing:
+#       x2Delta = max(avg * 0.5 - variance * factor - safetyMargin, 0)
+#       x3Delta = x2Delta * 2 / 3
+#    Assign x3Delta to Interpolated_1, Interpolated_2, and Real presentQpcDelta.
+# 6. Interpolation-thread readiness waits on the maximum fence needed by both generated
+#    outputs, not only Interpolated_1.
+#
+# NOTE: numGeneratedFrames is the FidelityFX-native multi-output mechanism. No DLSS MFG,
+# OptiScaler, or external MFG hook is involved.

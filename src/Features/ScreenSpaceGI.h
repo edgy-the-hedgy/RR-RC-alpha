@@ -1,0 +1,456 @@
+#pragma once
+
+#include "Buffer.h"
+#include "Utils/BootSnapshot.h"
+
+struct ScreenSpaceGI : Feature
+{
+private:
+	static constexpr std::string_view MOD_ID = "130375";
+
+public:
+	bool inline SupportsVR() override { return true; }
+
+	virtual inline std::string GetName() override { return "Screen Space GI"; }
+	virtual std::string GetDisplayName() override { return T("feature.screen_space_gi.name", "Screen Space GI"); }
+	virtual inline std::string GetShortName() override { return "ScreenSpaceGI"; }
+	virtual inline std::string GetFeatureModLink() override { return MakeNexusModURL(MOD_ID); }
+	virtual std::string_view GetCategory() const override { return FeatureCategories::kLighting; }
+
+	/** @brief Returns a localized description and list of key features for the UI summary panel. */
+	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
+	{
+		std::string desc =
+			T("feature.screen_space_gi.description",
+				"Screen Space Global Illumination adds realistic indirect lighting and "
+				"ambient occlusion to the game. This technique simulates how light "
+				"bounces off surfaces to illuminate other objects naturally.");
+		if (globals::game::isVR) {
+			desc +=
+				T("feature.screen_space_gi.vr_warning",
+					"\n\nWarning: In VR, this feature may have visual artifacts and "
+					"can have a significant performance impact due to the nature of "
+					"screen space effects.");
+		}
+		return std::make_pair(
+			desc,
+			std::vector<std::string>{
+				T("feature.screen_space_gi.key_feature_1", "Realistic indirect lighting"),
+				T("feature.screen_space_gi.key_feature_2", "Enhanced ambient occlusion"),
+				T("feature.screen_space_gi.key_feature_3", "Improved visual depth and atmosphere"),
+				T("feature.screen_space_gi.key_feature_4", "Temporal denoising for smooth results"),
+				T("feature.screen_space_gi.key_feature_5", "Configurable quality and performance settings") });
+	}
+
+	/** @brief Resets all settings to their default values and flags shaders for recompilation. */
+	virtual void RestoreDefaultSettings() override;
+	/** @brief Draws the ImGui settings UI with quality presets, visual parameters, and denoising options. */
+	virtual void DrawSettings() override;
+	virtual void DrawPerformanceSettings() override;
+	/// @brief DrawPerformanceSettings() only draws the stereo reprojection toggle.
+	bool PerformanceSectionRequiresVR() const override { return true; }
+	std::string GetPerformanceSectionLabel() override { return GetDisplayName(); }
+	int GetPerformanceOrder() const override { return 40; }
+	virtual void ApplyPerformanceProfile(PerfProfile profile) override;
+	bool MatchesPerformanceProfile(PerfProfile profile) const override;
+	/// @brief Renders the VR stereo reprojection toggle. Shared by the SSGI panel and the
+	/// Performance hub. VR-only; caller guards on isVR.
+	void DrawReprojectToggle();
+
+	virtual void LoadSettings(json& o_json) override;
+	virtual void SaveSettings(json& o_json) override;
+
+	/** @brief Registers the loading screen listener that resets the temporal history. */
+	virtual void PostPostLoad() override;
+	/** @brief Creates GPU textures, samplers, constant buffers, and compiles compute shaders. */
+	virtual void SetupResources() override;
+	/** @brief Releases and recompiles all SSGI compute shaders. */
+	virtual void ClearShaderCache() override;
+	/** @brief Compiles all SSGI compute shaders with current resolution and feature defines. */
+	void CompileComputeShaders();
+	/** @brief Checks whether all required compute shaders and the noise texture loaded successfully. */
+	bool ShadersOK();
+
+	/** @brief Executes the full SSGI pipeline: depth prefilter, radiance fetch, GI, blur, and upsample. */
+	void DrawSSGI();
+	
+	void ResetRadianceCacheAutomaticCadence() { rcAutomaticFrameIndex = 0; }
+
+	// NRC health telemetry.
+    uint32_t GetRCTelemetryTrainingSamples() const { return rcTelemetryTrainingSamples; }
+	uint32_t GetRCTelemetryValidQueries() const { return rcTelemetryValidQueries; }
+	uint32_t GetRCTelemetryFiniteCaptures() const { return rcTelemetryFiniteCaptures; }
+	uint32_t GetRCTelemetryOutsideVolume() const { return rcTelemetryOutsideVolume; }
+	uint32_t GetRCTelemetryNonFiniteCaptures() const { return rcTelemetryNonFiniteCaptures; }
+	float GetRCTelemetryMaxPositionExtent() const { return rcTelemetryMaxPositionExtent; }
+	float GetRCTelemetryPositionP95X() const { return rcTelemetryPositionP95X; }
+	float GetRCTelemetryPositionP95Y() const { return rcTelemetryPositionP95Y; }
+	float GetRCTelemetryPositionP95Z() const { return rcTelemetryPositionP95Z; }
+	float GetRCTelemetryPositionMaxX() const { return rcTelemetryPositionMaxX; }
+	float GetRCTelemetryPositionMaxY() const { return rcTelemetryPositionMaxY; }
+	float GetRCTelemetryPositionMaxZ() const { return rcTelemetryPositionMaxZ; }
+	float3 GetRCAdaptiveVolumeExtent() const { return rcAdaptiveVolumeExtent; }
+	float3 GetRCAdaptiveRequestedExtent() const { return rcAdaptiveRequestedExtent; }
+	uint32_t GetRCAdaptiveShrinkFramesX() const { return rcAdaptiveShrinkFramesX; }
+	uint32_t GetRCAdaptiveShrinkFramesY() const { return rcAdaptiveShrinkFramesY; }
+	uint32_t GetRCAdaptiveShrinkFramesZ() const { return rcAdaptiveShrinkFramesZ; }
+	uint32_t GetRCAdaptiveDomainResetCount() const { return rcAdaptiveDomainResetCount; }
+	uint32_t GetRCTelemetryPredictionCount() const { return rcTelemetryPredictionCount; }
+	uint32_t GetRCTelemetryFinitePredictions() const { return rcTelemetryFinitePredictions; }
+	uint32_t GetRCTelemetryValidOutputCells() const { return rcTelemetryValidOutputCells; }
+	uint32_t GetRCTelemetryResultAgeFrames() const { return rcTelemetryResultAgeFrames; }
+	float GetRCTelemetryMeanLuminance() const { return rcTelemetryMeanLuminance; }
+	float GetRCTelemetryMaxLuminance() const { return rcTelemetryMaxLuminance; }
+	float GetRCTelemetryMeanRGBMagnitude() const { return rcTelemetryMeanRGBMagnitude; }
+	/** @brief Updates the SSGI constant buffer with current camera, resolution, and settings data. */
+	void UpdateSB();
+	/** @brief Discard temporal accumulation before the next SSGI dispatch. */
+	void QueueHistoryReset() { queuedResetHistory.store(true, std::memory_order_release); }
+
+	//////////////////////////////////////////////////////////////////////////////////
+
+	bool recompileFlag = false;
+	uint outputAoIdx = 0;
+	uint outputIlIdx = 0;
+
+	// Loading screen radiance decays at only 1/MaxAccumFrames per frame, bleeding the old scene
+	// into the new one for some frames.
+	std::atomic<bool> queuedResetHistory{ true };
+
+	class MenuOpenCloseEventHandler : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+	{
+	public:
+		virtual RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override;
+
+		static bool Register();
+	};
+
+	static constexpr int kResourceProfileFullGI = 0;
+	static constexpr int kResourceProfileAOOnly = 1;
+
+	struct Settings
+	{
+		bool Enabled = true;
+		// Keep raw runtime check for ctor-time defaults before globals::ReInit().
+		bool EnableGI = REL::Module::IsVR() ? false : true;  // AO only for VR by default
+		bool EnableExperimentalSpecularGI = false;
+		bool EnableRayRegeneration = true;
+		bool EnableRadianceCache = false;
+            bool EnableRadianceCacheDiagnostics = false;
+		// NRC output mode: 0 = Base RR, 1 = NRC only, 2 = Combined.
+		int RadianceCacheOutputMode = 2;
+		float RadianceCacheContribution = 0.45f;
+        int RadianceCacheQuality = 2;  // Balanced = 64x64 every 2 frames.
+        // NRC learning can be paused without resetting learned weights.
+        bool EnableRadianceCacheTraining = true;
+        // Live AMD NRC training parameters.
+        float RadianceCacheLearningRate = 0.002f;
+        float RadianceCacheWeightSmoothing = 0.99f;
+		bool EnableVanillaSSAO = false;
+		// performance/quality
+		uint NumSlices = REL::Module::IsVR() ? 3u : 4u;  // AO preset for VR
+		uint NumSteps = REL::Module::IsVR() ? 6u : 8u;
+		bool EnableAdaptiveSampling = false;
+		int ResolutionMode = 1;  // 0-full, 1-half, 2-quarter - DBF default
+		// Restart-gated: default resource allocation follows the platform's default effect mode.
+		int ResourceProfile = EnableGI ? kResourceProfileFullGI : kResourceProfileAOOnly;
+		// visual
+		float MinScreenRadius = 0.01f;
+		float AORadius = 256.f;
+		float GIRadius = 256.f;
+		float Thickness = 32.f;
+		float2 DepthFadeRange = { 4e4, 5e4 };
+		// gi
+		float GISaturation = 0.8f;
+		float GIDistanceCompensation = 0.f;
+		// mix
+		float AOPower = 1.0f;
+		float GIStrength = 1.0f;
+		// denoise
+		bool EnableTemporalDenoiser = true;
+		bool EnableBlur = true;
+		float DepthDisocclusion = .1f;
+		float NormalDisocclusion = .1f;
+		uint MaxAccumFrames = 16;
+		float BlurRadius = 2.f;
+		float DistanceNormalisation = 2.f;
+		// VR: reproject eye 0's view-independent diffuse GI into eye 1 (skips the eye-1 march).
+		// Default on; ignored when specular GI is on (specular is view-dependent).
+		bool UseStereoReproject = true;
+		// Debug: VR-only unjittered projection/inverse-view reconstruction (avoids TAA jitter swim).
+		bool DebugUseUnjitteredCameraReconstruction = false;
+	} settings;
+
+	// Resource profile active since resource creation; a differing settings value is restart-pending.
+	int activeResourceProfile = kResourceProfileFullGI;
+
+	bool HasGIResources() const { return activeResourceProfile == kResourceProfileFullGI; }
+	bool IsGIActive() const { return settings.EnableGI && HasGIResources(); }
+	bool IsSpecularGIActive() const { return IsGIActive() && settings.EnableExperimentalSpecularGI; }
+
+	inline static constexpr Util::Settings::RestartTable<Settings, 1> kRestartFields{ {
+		UTIL_RESTART_FIELD(Settings, ResourceProfile, "SSGI Resource Profile"),
+	} };
+	Util::Settings::BootSnapshot<Settings> bootSnapshot{ kRestartFields };
+
+	std::span<const Util::Settings::RestartFieldInfo> GetRestartRequiredFields() const override
+	{
+		return { kRestartFields.data(), kRestartFields.size() };
+	}
+	const void* GetBootValue(std::string_view jsonKey) const override { return bootSnapshot.RawBoot(jsonKey); }
+	const void* GetSettingsBlob() const override { return &settings; }
+	size_t GetSettingsBlobSize() const override { return sizeof(settings); }
+
+	struct alignas(16) SSGICB
+	{
+		float4x4 PrevInvViewMat[2];
+		float2 NDCToViewMul[2];
+		float2 NDCToViewAdd[2];
+
+		float2 TexDim;
+		float2 RcpTexDim;  //
+		float2 FrameDim;
+		float2 RcpFrameDim;  //
+		uint FrameIndex;
+
+		uint NumSlices;
+		uint NumSteps;
+
+		float MinScreenRadius;  //
+		float AORadius;
+		float GIRadius;
+		float EffectRadius;
+		float Thickness;  //
+		float2 DepthFadeRange;
+		float DepthFadeScaleConst;
+
+		float GISaturation;  //
+		float GIDistanceCompensation;
+		float GICompensationMaxDist;
+		float pad1;
+
+		float AOPower;  //
+		float GIStrength;
+
+		float DepthDisocclusion;
+		float NormalDisocclusion;
+		uint MaxAccumFrames;  //
+
+		float BlurRadius;
+		float DistanceNormalisation;
+
+		uint UseModeTexture;  // VRStereoOptimizations' classification available this boot
+		uint RRHistoryValid;
+	
+		float4x4 InvViewMat[2];  // Current-frame view-to-world transform.
+
+	
+		float4 RadianceCacheVolumeCenter;  // xyz = snapped world-space center
+		float4 RadianceCacheVolumeExtent;  // xyz = independent half extents
+
+	
+		// Live NRC composition controls.
+	
+		uint RadianceCacheOutputMode;
+		float RadianceCacheContribution;
+		uint RadianceCacheGridSize;
+		uint RadianceCacheResultGridSize;
+	};
+	STATIC_ASSERT_ALIGNAS_16(SSGICB);
+	eastl::unique_ptr<ConstantBuffer> ssgiCB;
+
+	/// Set once per frame by UpdateSB(); DrawSSGI() reuses it instead of re-checking
+	/// VRStereoOptimizations' boot-latched classification readiness per dispatch.
+	bool useModeTextureThisFrame = false;
+
+	eastl::unique_ptr<Texture2D> texNoise = nullptr;
+	eastl::unique_ptr<Texture2D> texWorkingDepth = nullptr;
+	winrt::com_ptr<ID3D11UnorderedAccessView> uavWorkingDepth[5] = { nullptr };
+	eastl::unique_ptr<Texture2D> texPrevGeo = nullptr;
+	eastl::unique_ptr<Texture2D> texRadiance = nullptr;
+	eastl::unique_ptr<Texture2D> texRadianceTemp = nullptr;
+	winrt::com_ptr<ID3D11UnorderedAccessView> uavRadiance[5] = { nullptr };
+	eastl::unique_ptr<Texture2D> texNormal = nullptr;
+	winrt::com_ptr<ID3D11UnorderedAccessView> uavNormal[5] = { nullptr };
+	eastl::unique_ptr<Texture2D> texAccumFrames[2] = { nullptr };
+	eastl::unique_ptr<Texture2D> texAo[2] = { nullptr };
+	eastl::unique_ptr<Texture2D> texIlY[2] = { nullptr };
+	eastl::unique_ptr<Texture2D> texIlCoCg[2] = { nullptr };
+	eastl::unique_ptr<Texture2D> texGiSpecular[2] = { nullptr };
+	// Raw, pre-temporal indirect-specular signal for AMD FSR Ray Regeneration.
+	// RGB = noisy radiance, A = representative view-space ray hit distance; A < 0 means inactive.
+	eastl::unique_ptr<Texture2D> texRRSpecularInput = nullptr;
+        // Pre-RR radiance composition target.
+        // RGB may receive NRC contribution; alpha preserves the original RR hit distance.
+        eastl::unique_ptr<Texture2D> texRRCombinedInput = nullptr;
+	eastl::unique_ptr<Texture2D> texRRSpecularOutput = nullptr;
+	// Ray Regeneration feature maps, generated at the same logical resolution as the
+	// raw RR signal.  Float formats are intentional for the first integration pass:
+	// Structured buffers keep capture data layout explicit across the D3D11/D3D12 bridge.
+	eastl::unique_ptr<Texture2D> texRRLinearDepth[2] = { nullptr }; // R32F signed view depth, ping-ponged for motion Z
+	uint rrDepthHistoryIdx = 0;
+	bool rrDepthHistoryValid = false;
+	eastl::unique_ptr<Texture2D> texRRMotionVectors = nullptr;    // RGBA16F: prevUV-currentUV, depth delta in B
+	eastl::unique_ptr<Texture2D> texRRNormalRoughness = nullptr;  // RGBA16F: oct normal, roughness, material id
+	eastl::unique_ptr<Texture2D> texRRSpecularAlbedo = nullptr;   // RGBA16F, linear
+	eastl::unique_ptr<Texture2D> texRRDiffuseAlbedo = nullptr;    // RGBA16F, linear
+
+	/** Raw pre-temporal indirect-specular signal prepared for Ray Regeneration. */
+	inline ID3D11Texture2D* GetRRSpecularInputTexture() const
+	{
+		return texRRSpecularInput ? texRRSpecularInput->resource.get() : nullptr;
+	}
+
+	inline ID3D11ShaderResourceView* GetRRSpecularInputSRV() const
+	{
+		return texRRSpecularInput ? texRRSpecularInput->srv.get() : nullptr;
+	}
+
+	struct RRInputs
+	{
+		ID3D11Texture2D* signal = nullptr;
+		ID3D11Texture2D* linearDepth = nullptr;
+		ID3D11Texture2D* motionVectors = nullptr;
+		ID3D11Texture2D* normalRoughness = nullptr;
+		ID3D11Texture2D* specularAlbedo = nullptr;
+		ID3D11Texture2D* diffuseAlbedo = nullptr;
+	};
+
+	inline RRInputs GetRRInputs() const
+	{
+		return {
+			texRRSpecularInput ? texRRSpecularInput->resource.get() : nullptr,
+			texRRLinearDepth[rrDepthHistoryIdx] ? texRRLinearDepth[rrDepthHistoryIdx]->resource.get() : nullptr,
+			texRRMotionVectors ? texRRMotionVectors->resource.get() : nullptr,
+			texRRNormalRoughness ? texRRNormalRoughness->resource.get() : nullptr,
+			texRRSpecularAlbedo ? texRRSpecularAlbedo->resource.get() : nullptr,
+			texRRDiffuseAlbedo ? texRRDiffuseAlbedo->resource.get() : nullptr };
+	}
+
+	/** @brief Returns the current output SRVs for AO, indirect lighting Y/CoCg, and specular GI (or nullptrs if disabled). */
+	inline std::tuple<ID3D11ShaderResourceView*, ID3D11ShaderResourceView*, ID3D11ShaderResourceView*, ID3D11ShaderResourceView*> GetOutputTextures()
+	{
+		if (!(loaded && settings.Enabled) || outputAoIdx >= 2 || outputIlIdx >= 2 || !texAo[outputAoIdx])
+			return { nullptr, nullptr, nullptr, nullptr };
+
+		return {
+			texAo[outputAoIdx]->srv.get(),
+			texIlY[outputIlIdx] ? texIlY[outputIlIdx]->srv.get() : nullptr,
+			texIlCoCg[outputIlIdx] ? texIlCoCg[outputIlIdx]->srv.get() : nullptr,
+			texGiSpecular[outputAoIdx] ? texGiSpecular[outputAoIdx]->srv.get() : nullptr
+		};
+	}
+
+	winrt::com_ptr<ID3D11SamplerState> linearClampSampler = nullptr;
+	winrt::com_ptr<ID3D11SamplerState> pointClampSampler = nullptr;
+
+	winrt::com_ptr<ID3D11ComputeShader> prefilterDepthsCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> prefilterRadianceCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> prefilterNormalCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> radianceDisoccCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> giCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> giEye0OnlyCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> blurCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> stereoSyncCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> reprojectCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> reprojectDebugCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> upsampleCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> rrPrepareInputsCompute = nullptr;
+	winrt::com_ptr<ID3D11ComputeShader> rcComposeRadianceCompute = nullptr;
+
+
+// Automatic NRC inference cadence.
+// Counter is reset when the feature is enabled so frame 0 runs immediately.
+uint32_t rcAutomaticFrameIndex = 0;
+	winrt::com_ptr<ID3D11ComputeShader> rcCaptureInputCompute = nullptr;
+
+     bool EnsureRadianceCacheCaptureResources();
+     void EnsureRadianceCacheOutputTexture();
+     void ProcessRadianceCacheInference(uint32_t a_gridSize, uint32_t a_validCount, uint32_t a_trainingCount);
+
+     // D3D11 capture UAV and asynchronous staging ring.
+     // A capture is copied into a free slot and consumed later with
+     // D3D11_MAP_FLAG_DO_NOT_WAIT, so the render thread never waits for
+     // the capture copy to finish.
+     // Persistent CPU working storage for NRC capture processing.
+     // Keeping these fixed-capacity buffers off DrawSSGI's stack avoids
+     // allocating roughly 492 KiB of temporary arrays in the frame path.
+     static constexpr uint32_t kRCScratchMaxSampleCount = 4096;
+     static constexpr uint32_t kRCScratchInputFloatCount = 11;
+     struct RadianceCacheScratch
+     {
+         float positionExtentX[kRCScratchMaxSampleCount]{};
+         float positionExtentY[kRCScratchMaxSampleCount]{};
+         float positionExtentZ[kRCScratchMaxSampleCount]{};
+
+         float compactedInputs[kRCScratchMaxSampleCount * kRCScratchInputFloatCount]{};
+         float compactedTrainingInputs[kRCScratchMaxSampleCount * kRCScratchInputFloatCount]{};
+         float compactedTrainingTargets[kRCScratchMaxSampleCount * 3]{};
+         uint32_t sourceQueryIndices[kRCScratchMaxSampleCount]{};
+
+         float predictedRadiance[kRCScratchMaxSampleCount * 3]{};
+         uint32_t predictedSourceQueryIndices[kRCScratchMaxSampleCount]{};
+         float radiancePixels[kRCScratchMaxSampleCount * 4]{};
+     };
+     RadianceCacheScratch rcScratch{};
+
+     static constexpr uint32_t kRCCaptureReadbackRingSize = 3;
+     winrt::com_ptr<ID3D11Buffer> rcCaptureBuffer = nullptr;
+     winrt::com_ptr<ID3D11UnorderedAccessView> rcCaptureUAV = nullptr;
+
+     // Paired SSGI-supervised NRC training target.
+     // One float3 radiance target is produced for every physical capture query.
+     winrt::com_ptr<ID3D11Buffer> rcTrainingTargetBuffer = nullptr;
+     winrt::com_ptr<ID3D11UnorderedAccessView> rcTrainingTargetUAV = nullptr;
+
+     // Paired asynchronous training-target staging ring.
+     // Slot N always corresponds to rcCaptureReadbacks[N].
+     winrt::com_ptr<ID3D11Buffer> rcTrainingTargetReadbacks[kRCCaptureReadbackRingSize]{};
+     winrt::com_ptr<ID3D11Buffer> rcCaptureReadbacks[kRCCaptureReadbackRingSize]{};
+     bool rcCaptureReadbackPending[kRCCaptureReadbackRingSize]{};
+     // Grid topology associated with each asynchronous capture.
+     uint32_t rcCaptureReadbackGridSize[kRCCaptureReadbackRingSize]{};
+     uint32_t rcCaptureWriteSlot = 0;
+     uint32_t rcCaptureReadSlot = 0;
+     // Grid topology preserved across the asynchronous NRC boundary.
+     uint32_t rcPendingInferenceGridSize = 0;
+     uint32_t rcResultGridSize = 0;
+
+     // NRC radiance grid reconstructed from asynchronous inference results.
+     // Active-grid RGBA32F: RGB = NRC prediction, A = valid prediction.
+     eastl::unique_ptr<Texture2D> texRCRadiance = nullptr;
+
+     // CPU-side NRC health telemetry.
+    uint32_t rcTelemetryTrainingSamples = 0;
+     uint32_t rcTelemetryValidQueries = 0;
+	uint32_t rcTelemetryFiniteCaptures = 0;
+	uint32_t rcTelemetryOutsideVolume = 0;
+	uint32_t rcTelemetryNonFiniteCaptures = 0;
+	float rcTelemetryMaxPositionExtent = 0.0f;
+	float rcTelemetryPositionP95X = 0.0f;
+	float rcTelemetryPositionP95Y = 0.0f;
+	float rcTelemetryPositionP95Z = 0.0f;
+	float rcTelemetryPositionMaxX = 0.0f;
+	float rcTelemetryPositionMaxY = 0.0f;
+	float rcTelemetryPositionMaxZ = 0.0f;
+	
+	// Persistent anisotropic NRC spatial-domain controller.
+	float3 rcAdaptiveVolumeExtent{ 4096.0f, 4096.0f, 4096.0f };
+	float3 rcAdaptiveRequestedExtent{ 4096.0f, 4096.0f, 4096.0f };
+	uint32_t rcAdaptiveDomainResetCount = 0;
+	uint32_t rcAdaptiveShrinkFramesX = 0;
+	uint32_t rcAdaptiveShrinkFramesY = 0;
+	uint32_t rcAdaptiveShrinkFramesZ = 0;
+     uint32_t rcTelemetryPredictionCount = 0;
+     uint32_t rcTelemetryFinitePredictions = 0;
+     uint32_t rcTelemetryValidOutputCells = 0;
+     uint32_t rcTelemetryResultAgeFrames = 0;
+     float rcTelemetryMeanLuminance = 0.0f;
+     float rcTelemetryMaxLuminance = 0.0f;
+     float rcTelemetryMeanRGBMagnitude = 0.0f;
+winrt::com_ptr<ID3D11ComputeShader> rrApplyOutputCompute = nullptr;
+};
+
+
+
+
